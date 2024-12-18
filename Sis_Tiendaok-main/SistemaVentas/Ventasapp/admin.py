@@ -2,6 +2,7 @@ from django.contrib import admin
 from django import forms
 from .models import Clientes, Empleados, Factura, Productos, Proveedores, Empresas
 
+
 class FacturaForm(forms.ModelForm):
     class Meta:
         model = Factura
@@ -10,16 +11,16 @@ class FacturaForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Verificar si el estado no está definido (o está vacío)
-        if not self.instance.estado:
-            self.fields['estado'].widget = forms.HiddenInput()
-            self.fields['estado'].initial = 'ACTIVA'
+      
 
-        # Deshabilitar cliente si es "Consumidor Final"
-        if self.instance and self.instance.tipo_factura == 'CONSUMIDOR_FINAL':
-            self.fields['cliente'].disabled = True  # Bloquear el campo cliente
-        else:
-            self.fields['cliente'].disabled = False
+    def clean_cliente(self):
+        """Validar que el cliente sea obligatorio para facturas de tipo 'DATOS_COMPLETOS'."""
+        cliente = self.cleaned_data.get('cliente')
+        tipo_factura = self.cleaned_data.get('tipo_factura')
+
+        if tipo_factura == 'DATOS_COMPLETOS' and not cliente:
+            raise forms.ValidationError("El cliente es obligatorio para facturas con datos completos.")
+        return cliente
 
 
 
@@ -28,20 +29,38 @@ class FacturaForm(forms.ModelForm):
 class ClientesAdmin(admin.ModelAdmin):
     list_display = ('cedula', 'nombre', 'apellido', 'telefono', 'direccion', 'email')
     search_fields = ('cedula', 'nombre', 'apellido')
-    list_filter = ('cedula', 'apellido')
+    list_filter = ('fecha_creacion',)
+    ordering = ('nombre',)
+    list_per_page = 25
 
 
 # Empleados Admin
 @admin.register(Empleados)
 class EmpleadosAdmin(admin.ModelAdmin):
     list_display = ('cedula', 'nombre', 'apellido', 'telefono', 'email', 'direccion', 'fecha_creacion', 'fecha_nacimiento')
-    search_fields = ('cedula', 'apellido')
+    search_fields = ('cedula', 'nombre', 'apellido')
+    list_filter = ('fecha_creacion', 'fecha_nacimiento')
+    ordering = ('nombre',)
+    list_per_page = 25
 
 
 # Productos Admin
 @admin.register(Productos)
 class ProductosAdmin(admin.ModelAdmin):
-    list_display = ('codigo', 'nombre', 'cantidad_stock')
+    list_display = ('codigo', 'nombre', 'marca', 'categoria', 'precio', 'cantidad_stock')
+    search_fields = ('codigo', 'nombre', 'marca')
+    list_filter = ('categoria', 'fecha_creacion')
+    ordering = ('nombre',)
+    list_per_page = 25
+    actions = ['actualizar_stock']
+
+    def actualizar_stock(self, request, queryset):
+        """Ejemplo de acción personalizada: Actualizar stock."""
+        for producto in queryset:
+            producto.cantidad_stock += 10  # Incrementar stock en 10 unidades
+            producto.save()
+        self.message_user(request, "El stock de los productos seleccionados se ha actualizado correctamente.")
+    actualizar_stock.short_description = "Actualizar stock (+10)"
 
 
 # Factura Admin
@@ -51,8 +70,11 @@ class FacturaAdmin(admin.ModelAdmin):
     list_display = ('codigo_factura', 'fecha_factura', 'tipo_factura', 'get_cliente_nombre', 'empleado', 'producto', 'cantidad', 'total', 'estado')
     raw_id_fields = ('cliente', 'empleado', 'producto')
     search_fields = ('codigo_factura', 'cliente__nombre', 'producto__nombre')
+    list_filter = ('fecha_factura', 'tipo_factura', 'estado')
+    ordering = ('-fecha_factura',)
+    list_per_page = 25
     actions = ['anular_factura', 'devolver_factura']
-    
+
     class Media:
         js = ('js/factura_admin.js',)
 
@@ -62,11 +84,10 @@ class FacturaAdmin(admin.ModelAdmin):
     get_cliente_nombre.short_description = 'Nombre del Cliente'
 
     def get_readonly_fields(self, request, obj=None):
-        """Deshabilitar estado y cliente según tipo de factura."""
+        """Deshabilitar campos según condiciones."""
         if obj:  # Al editar una factura existente
             if obj.tipo_factura == 'CONSUMIDOR_FINAL':
                 return self.readonly_fields + ('cliente', 'estado')  # Bloquear cliente y estado
-            return self.readonly_fields
         return self.readonly_fields + ('estado',)  # Ocultar estado al crear
 
     def anular_factura(self, request, queryset):
@@ -74,9 +95,6 @@ class FacturaAdmin(admin.ModelAdmin):
         for factura in queryset:
             if factura.estado != 'ACTIVA':
                 self.message_user(request, f"La factura {factura.codigo_factura} no puede ser anulada porque no está activa.", level="error")
-                continue
-            if factura.tipo_factura != 'CON_DATOS':
-                self.message_user(request, f"No se puede anular la factura {factura.codigo_factura}. Solo facturas con datos pueden ser anuladas.", level="error")
                 continue
             factura.producto.cantidad_stock += factura.cantidad
             factura.producto.save()
@@ -91,9 +109,6 @@ class FacturaAdmin(admin.ModelAdmin):
             if factura.estado != 'ACTIVA':
                 self.message_user(request, f"La factura {factura.codigo_factura} no puede ser devuelta porque no está activa.", level="error")
                 continue
-            if factura.tipo_factura != 'CON_DATOS':
-                self.message_user(request, f"No se puede devolver la factura {factura.codigo_factura}. Solo facturas con datos pueden ser devueltas.", level="error")
-                continue
             factura.producto.cantidad_stock += factura.cantidad
             factura.producto.save()
             factura.estado = 'DEVUELTA'
@@ -102,15 +117,21 @@ class FacturaAdmin(admin.ModelAdmin):
     devolver_factura.short_description = 'Devolver factura seleccionada'
 
 
-
 # Proveedores Admin
 @admin.register(Proveedores)
 class ProveedoresAdmin(admin.ModelAdmin):
-    list_display = ('cedula', 'nombre', 'apellido')
+    list_display = ('cedula', 'nombre', 'apellido', 'telefono', 'email', 'empresa')
+    search_fields = ('cedula', 'nombre', 'apellido', 'email')
+    list_filter = ('empresa',)
+    ordering = ('nombre',)
+    list_per_page = 25
 
 
 # Empresas Admin
 @admin.register(Empresas)
 class EmpresasAdmin(admin.ModelAdmin):
-    list_display = ('ruc', 'nombre', 'telefono')
-
+    list_display = ('ruc', 'nombre', 'telefono', 'email', 'fecha_creacion')
+    search_fields = ('ruc', 'nombre', 'email')
+    list_filter = ('fecha_creacion',)
+    ordering = ('nombre',)
+    list_per_page = 25
