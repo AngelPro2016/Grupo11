@@ -5,8 +5,9 @@ from django.utils import timezone
 from dateutil.relativedelta import relativedelta
 from django.core.validators import MinValueValidator, MaxValueValidator, MaxLengthValidator, MinLengthValidator
 from .validadores import validacion_numeros, Validacion_letras,ValidationError, validacion_especial,validacion_especial2,validacion_especial3,validar_cedula,validar_telefono
-
+from datetime import timedelta, date
 from django.conf import settings
+
 IVA_PERCENT = getattr(settings, 'IVA_PERCENT', Decimal("0.15"))
 
 class Clientes(models.Model):
@@ -57,6 +58,20 @@ class Productos(models.Model):
     fecha_elaboracion = models.DateField()
     fecha_vencimiento = models.DateField()
 
+    def clean(self):
+        # fechas iguales
+        if self.fecha_vencimiento == self.fecha_elaboracion:
+            raise ValidationError('La fecha de vencimiento y la fecha de elaboración no pueden ser la misma.')
+        
+        # no debe estar distanciados por 5
+        max_diferencia = timedelta(days=5*365)  # 5 a;os
+        if self.fecha_vencimiento - self.fecha_elaboracion > max_diferencia:
+            raise ValidationError('La fecha de elaboración no debe tener una diferencia mayor a 5 años con la fecha de vencimiento.')
+    def save(self, *args, **kwargs):
+        # Ejecutar validación personalizada antes de guardar
+        self.clean()
+        super().save(*args, **kwargs)
+
     def actualizar_stock(self, cantidad):
         """Actualiza el stock del producto verificando que no sea menor a cero."""
         if cantidad > self.cantidad_stock:
@@ -89,9 +104,9 @@ class Empresas(models.Model):
                 'fecha_inicio_actividades': 'La fecha de inicio de actividades no puede ser en el futuro.'
             })
         
-        # Validar que fecha_inicio_actividades no sea posterior a fecha_creacion
-        if self.fecha_inicio_actividades and self.fecha_inicio_actividades > self.fecha_creacion.date():
-            raise ValidationError({
+        if self.fecha_inicio_actividades and self.fecha_creacion:
+            if self.fecha_inicio_actividades > self.fecha_creacion:
+                raise ValidationError({
                 'fecha_inicio_actividades': 'La fecha de inicio de actividades no puede ser posterior a la fecha de creación.'
             })
 

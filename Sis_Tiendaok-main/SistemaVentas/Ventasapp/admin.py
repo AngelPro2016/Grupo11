@@ -2,7 +2,6 @@ from django.contrib import admin
 from django import forms
 from .models import Clientes, Empleados, Factura, Productos, Proveedores, Empresas
 
-# Formulario personalizado para Factura
 class FacturaForm(forms.ModelForm):
     class Meta:
         model = Factura
@@ -10,14 +9,18 @@ class FacturaForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if not self.instance.ak:
+
+        # Verificar si el estado no está definido (o está vacío)
+        if not self.instance.estado:
             self.fields['estado'].widget = forms.HiddenInput()
-            self.fields['estado'].initial = 'Activa'  
+            self.fields['estado'].initial = 'ACTIVA'
+
         # Deshabilitar cliente si es "Consumidor Final"
         if self.instance and self.instance.tipo_factura == 'CONSUMIDOR_FINAL':
             self.fields['cliente'].disabled = True  # Bloquear el campo cliente
         else:
             self.fields['cliente'].disabled = False
+
 
 
 # Clientes Admin
